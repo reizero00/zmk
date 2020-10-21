@@ -13,6 +13,10 @@ config ZMK_KSCAN_DIRECT_POLLING
 	bool "Poll for key event triggers instead of using interrupts on direct wired boards."
     default n
 
+config ZMK_KSCAN_DEMUX_POLLING
+	bool "Poll for key event triggers instead of using interrupts on demuxed boards."
+    default n
+
 endif
 
 config ZMK_KSCAN_INIT_PRIORITY
