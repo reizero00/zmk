@@ -5,3 +5,6 @@
 /zephyr
 /build
 *.DS_Store
+app/prj.conf
+.vscode/settings.json
+.vscode/tasks.json

@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: MIT
  */
 
+// TODO: Remove interrupt-based code
+// Remove IF_POLLED checks as a result
+// Remove MATRIX_POLLING from yaml/kconfig files
+// TODO: Optimize COND_CODE statements
+
 #define DT_DRV_COMPAT zmk_kscan_gpio_demux
 
 #include <device.h>
@@ -21,6 +26,7 @@ struct kscan_gpio_item_config {
     gpio_flags_t flags;
 };
 
+// Define GPIO cfg
 #define _KSCAN_GPIO_ITEM_CFG_INIT(n, prop, idx)                                                    \
     {                                                                                              \
         .label = DT_INST_GPIO_LABEL_BY_IDX(n, prop, idx),                                          \
@@ -28,8 +34,25 @@ struct kscan_gpio_item_config {
         .flags = DT_INST_GPIO_FLAGS_BY_IDX(n, prop, idx),                                          \
     },
 
+// Define row and col cfg
 #define _KSCAN_GPIO_ROW_CFG_INIT(idx, n) _KSCAN_GPIO_ITEM_CFG_INIT(n, row_gpios, idx)
 #define _KSCAN_GPIO_COL_CFG_INIT(idx, n) _KSCAN_GPIO_ITEM_CFG_INIT(n, col_gpios, idx)
+
+// Define the row and column lengths
+#define INST_MATRIX_ROWS(n) DT_INST_PROP_LEN(n, row_gpios)
+#define INST_MATRIX_COLS(n) DT_INST_PROP(n, total_cols)
+#define INST_DEMUX_COLS(n) DT_INST_PROP_LEN(n, col_gpios)
+
+// Check if configured to run in polled mode. a if true, b if false
+#define IF_KSCAN_POLLED(a, b) COND_CODE_1(CONFIG_ZMK_KSCAN_DEMUX_POLLING, a, b)
+// Check if configured for row2col diode arrangement. a if true, b if false
+#define IF_IS_ROW2COL(n, a, b) COND_CODE_0(DT_ENUM_IDX(DT_DRV_INST(n), diode_direction), a, b)
+
+// If row2col, rows = outputs & cols = inputs
+// Physical IO devices (GPIO pins)
+#define INST_OUTPUT_LEN(n) IF_IS_ROW2COL(n, (INST_MATRIX_ROWS(n)), (INST_MATRIX_COLS(n)))
+// Physical IO devices (GPIO pins)
+#define INST_INPUT_LEN(n) IF_IS_ROW2COL(n, (INST_MATRIX_COLS(n)), (INST_MATRIX_ROWS(n)))
 
 #if !defined(CONFIG_ZMK_KSCAN_DEMUX_POLLING)
 static int kscan_gpio_config_interrupts(struct device **devices,
@@ -49,25 +72,6 @@ static int kscan_gpio_config_interrupts(struct device **devices,
     return 0;
 }
 #endif
-
-#define IF_KSCAN_POLLED(a, b) COND_CODE_1(CONFIG_ZMK_KSCAN_DEMUX_POLLING, a, b)
-
-#define INST_MATRIX_ROWS(n) DT_INST_PROP_LEN(n, row_gpios)
-#define INST_MATRIX_COLS(n) DT_INST_PROP(n, total_cols)
-#define INST_DEMUX_COLS(n) DT_INST_PROP_LEN(n, col_gpios)
-
-// a if true, b if false
-#define IF_IS_ROW2COL(n, a, b) COND_CODE_0(DT_ENUM_IDX(DT_DRV_INST(n), diode_direction), a, b)
-
-// Below is set based on row2col or col2row.
-// row2col is enum item 0, col2row is enum item 1
-// If row2col, rows = outputs & cols = inputs
-// TODO: NIBBLE is row2col, BUT active low with cols as outputs.
-
-// Physical IO devices (GPIO pins)
-#define INST_OUTPUT_LEN(n) IF_IS_ROW2COL(n, (INST_MATRIX_ROWS(n)), (INST_MATRIX_COLS(n)))
-// Physical IO devices (GPIO pins)
-#define INST_INPUT_LEN(n) IF_IS_ROW2COL(n, (INST_MATRIX_COLS(n)), (INST_MATRIX_ROWS(n)))
 
 #define GPIO_INST_INIT(n)                                                                          \
     struct kscan_gpio_irq_callback_##n {                                                           \
@@ -89,10 +93,9 @@ static int kscan_gpio_config_interrupts(struct device **devices,
         IF_KSCAN_POLLED((struct k_timer poll_timer;), ())                                          \
         struct COND_CODE_0(DT_INST_PROP(n, debounce_period), (k_work), (k_delayed_work)) work;     \
                                                                                                    \
-        /* TODO: change to use total-cols*/                                                        \
         bool matrix_state[INST_MATRIX_ROWS(n)][INST_MATRIX_COLS(n)];                               \
         struct device *rows[INST_MATRIX_ROWS(n)];                                                  \
-        struct device *cols[INST_DEMUX_COLS(n)];                                                   \
+        struct device *cols[INST_MATRIX_COLS(n)];                                                  \
         struct device *dev;                                                                        \
     };                                                                                             \
     /* IO/GPIO SETUP */                                                                            \
@@ -107,8 +110,8 @@ static int kscan_gpio_config_interrupts(struct device **devices,
         const struct kscan_gpio_config_##n *cfg = dev->config_info;                                \
         /* If row2col, rows = outputs & cols = inputs */                                           \
         return IF_IS_ROW2COL(n, (cfg->cols), (cfg->rows));                                         \
-        ;                                                                                          \
     }                                                                                              \
+                                                                                                   \
     /* gpio_output_devices are PHYSICAL IO devices */                                              \
     static struct device **kscan_gpio_output_devices_##n(struct device *dev) {                     \
         struct kscan_gpio_data_##n *data = dev->driver_data;                                       \
@@ -135,7 +138,8 @@ static int kscan_gpio_config_interrupts(struct device **devices,
                                                         kscan_gpio_input_configs_##n(dev),         \
                                                         INST_INPUT_LEN(n), GPIO_INT_DISABLE);      \
                 }))                                                                                \
-    /* POLLING SETUP */ /* Only insert code if POLLING = True */                                   \
+    /* POLLING SETUP */                                                                            \
+    /* Only insert code if POLLING = True */                                                       \
     IF_KSCAN_POLLED((static void kscan_gpio_timer_handler(struct k_timer *timer) {                 \
                         struct kscan_gpio_data_##n *data =                                         \
                             CONTAINER_OF(timer, struct kscan_gpio_data_##n, poll_timer);           \
@@ -143,20 +147,7 @@ static int kscan_gpio_config_interrupts(struct device **devices,
                     }),                                                                            \
                     ())                                                                            \
                                                                                                    \
-    /* Set the state of all output GPIOs */                                                        \
-    static void kscan_gpio_set_output_state_##n(struct device *dev, int value) {                   \
-        int err;                                                                                   \
-        for (int i = 0; i < INST_DEMUX_COLS(n); i++) {                                             \
-            struct device *in_dev = kscan_gpio_output_devices_##n(dev)[i];                         \
-            const struct kscan_gpio_item_config *cfg = &kscan_gpio_output_configs_##n(dev)[i];     \
-            if ((err = gpio_pin_set(in_dev, cfg->pin, value))) {                                   \
-                LOG_DBG("FAILED TO SET OUTPUT %d to %d", cfg->pin, err);                           \
-            }                                                                                      \
-        }                                                                                          \
-    }                                                                                              \
-                                                                                                   \
     /* Update the matrix state variable at the indices i,o */                                      \
-    /* TODO: change to use total-cols*/                                                            \
     static void kscan_gpio_set_matrix_state_##n(                                                   \
         bool state[INST_MATRIX_ROWS(n)][INST_MATRIX_COLS(n)], u32_t input_index,                   \
         u32_t output_index, bool value) {                                                          \
@@ -169,14 +160,7 @@ static int kscan_gpio_config_interrupts(struct device **devices,
     static int kscan_gpio_read_##n(struct device *dev) {                                           \
         bool submit_follow_up_read = false;                                                        \
         struct kscan_gpio_data_##n *data = dev->driver_data;                                       \
-        /* TODO: change to use total-cols!*/                                                       \
         static bool read_state[INST_MATRIX_ROWS(n)][INST_MATRIX_COLS(n)];                          \
-        /* Disable our interrupts temporarily while we scan, to avoid       */                     \
-        /* re-entry while we iterate columns and set them active one by one */                     \
-        /* to get pressed state for each matrix cell.                       */                     \
-        /* TODO: Only needed during interrupt mode, but still won't work right... */               \
-        kscan_gpio_set_output_state_##n(dev, 0);                                                   \
-        int err;                                                                                   \
         for (int o = 0; o < INST_OUTPUT_LEN(n); o++) {                                             \
             /* Iterate over bits and set GPIOs accordingly */                                      \
             for (u8_t bit = 0; bit < INST_DEMUX_COLS(n); bit++) {                                  \
@@ -184,9 +168,7 @@ static int kscan_gpio_config_interrupts(struct device **devices,
                 struct device *out_dev = kscan_gpio_output_devices_##n(dev)[bit];                  \
                 const struct kscan_gpio_item_config *out_cfg =                                     \
                     &kscan_gpio_output_configs_##n(dev)[bit];                                      \
-                if ((err = gpio_pin_set(out_dev, out_cfg->pin, state))) {                          \
-                    LOG_DBG("FAILED TO SET OUTPUT %d to %d", out_cfg->pin, err);                   \
-                }                                                                                  \
+                gpio_pin_set(out_dev, out_cfg->pin, state);                                        \
             }                                                                                      \
                                                                                                    \
             for (int i = 0; i < INST_INPUT_LEN(n); i++) {                                          \
@@ -199,9 +181,6 @@ static int kscan_gpio_config_interrupts(struct device **devices,
                                                 gpio_pin_get(in_dev, in_cfg->pin) > 0);            \
             }                                                                                      \
         }                                                                                          \
-        /* Set all our outputs as active again. */                                                 \
-        /* TODO: Only needed during interrupt mode, but still won't work right... */               \
-        kscan_gpio_set_output_state_##n(dev, 1);                                                   \
         for (int r = 0; r < INST_MATRIX_ROWS(n); r++) {                                            \
             for (int c = 0; c < INST_MATRIX_COLS(n); c++) {                                        \
                 bool pressed = read_state[r][c];                                                   \
