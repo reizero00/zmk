@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-// TODO: Remove interrupt-based code
-// Remove IF_POLLED checks as a result
-// Remove MATRIX_POLLING from yaml/kconfig files
-// TODO: Optimize COND_CODE statements
-
 #define DT_DRV_COMPAT zmk_kscan_gpio_demux
 
 #include <device.h>
@@ -238,7 +233,6 @@ static int kscan_gpio_config_interrupts(struct device **devices,
     /* KSCAN API enable function */                                                                \
     static int kscan_gpio_enable_##n(struct device *dev) {                                         \
         LOG_DBG("KSCAN API enable");                                                               \
-        /* TODO: change back to 10ms or less */                                                    \
         IF_KSCAN_POLLED((struct kscan_gpio_data_##n *data = dev->driver_data;                      \
                          k_timer_start(&data->poll_timer, K_MSEC(25), K_MSEC(25)); return 0;),     \
                         (int err = kscan_gpio_enable_interrupts_##n(dev);                          \
